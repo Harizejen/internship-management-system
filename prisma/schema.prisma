@@ -1,0 +1,95 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                   String           @id @default(cuid())
+  name                 String
+  email                String           @unique
+  role                 Role             @default(STUDENT)
+  createdAt            DateTime         @default(now())
+  studentProfile       StudentProfile?  @relation("UserToProfile")
+  academicSupervisions StudentProfile[] @relation("AcademicSupervised")
+  orgSupervisions      StudentProfile[] @relation("OrgSupervised")
+}
+
+enum Role {
+  STUDENT
+  ACADEMIC_SUPERVISOR
+  ORGANIZATION_SUPERVISOR
+  ADMIN
+}
+
+model StudentProfile {
+  id       String @id @default(cuid())
+  userId   String @unique
+  user     User   @relation("UserToProfile", fields: [userId], references: [id], onDelete: Cascade)
+  matricId String @unique
+  icNumber String @unique
+  phone    String
+  course   String
+  cgpa     Float
+  address  String
+
+  // Placement details
+  organizationName String?
+  startDate        DateTime?
+  endDate          DateTime?
+  status           PlacementStatus @default(PENDING)
+
+  // Relationships
+  academicSupervisorId String?
+  academicSupervisor   User?   @relation("AcademicSupervised", fields: [academicSupervisorId], references: [id])
+  orgSupervisorId      String?
+  orgSupervisor        User?   @relation("OrgSupervised", fields: [orgSupervisorId], references: [id])
+
+  // Active Connections
+  submissions    DocumentSubmission[]
+  logbookEntries LogbookEntry[]
+}
+
+enum PlacementStatus {
+  PENDING
+  ONGOING
+  COMPLETED
+}
+
+model DocumentSubmission {
+  id          String         @id @default(cuid())
+  studentId   String
+  student     StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  taskName    String
+  fileUrl     String
+  isCompleted Boolean        @default(false)
+  updatedAt   DateTime       @updatedAt
+}
+
+model LogbookEntry {
+  id              String         @id @default(cuid())
+  studentId       String
+  student         StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  date            DateTime
+  weekNumber      Int
+  activityDetails String         @db.Text
+  hoursWorked     Float          @default(8.0)
+  isLocked        Boolean        @default(false)
+
+  // Dual-Supervisor Verification
+  orgApproved   Boolean   @default(false)
+  orgFeedback   String?   @db.Text
+  orgApprovedAt DateTime?
+
+  acadApproved   Boolean   @default(false)
+  acadFeedback   String?   @db.Text
+  acadApprovedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, date])
+}
