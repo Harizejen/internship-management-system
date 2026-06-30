@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { Role } from "@prisma/client";
 import { JWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
+import Nodemailer from "next-auth/providers/nodemailer";
 
 declare module "next-auth" {
   interface User {
@@ -11,6 +12,7 @@ declare module "next-auth" {
   }
   interface Session {
     user: {
+      id: string;
       role?: Role;
     } & DefaultSession["user"];
   }
@@ -18,6 +20,7 @@ declare module "next-auth" {
 
 declare module "next-auth/jwt" {
   interface JWT {
+    id?: string;
     role?: Role;
   }
 }
@@ -26,6 +29,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
   session: { strategy: "jwt" },
   providers: [
+    Nodemailer({
+      server: {
+        host: process.env.EMAIL_SERVER_HOST,
+        port: Number(process.env.EMAIL_SERVER_PORT),
+        auth: {
+          user: process.env.EMAIL_SERVER_USER,
+          pass: process.env.EMAIL_SERVER_PASSWORD,
+        },
+      },
+      from: process.env.EMAIL_FROM,
+    }),
     Credentials({
       name: "Credentials",
       credentials: {
@@ -37,30 +51,58 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         const input = credentials.identifier as string;
 
-        // 1. Attempt to look up the user directly by their Institutional Email
+        // 1. First Pass: Check by Email address
         let user = await prisma.user.findUnique({
           where: { email: input },
-          include: { studentProfile: true },
+          include: { studentProfile: true, academicProfile: true },
         });
 
-        // 2. If no email matches, check if they typed their raw Student ID instead
+        // 2. Second Pass: Check if input matches an Academic Supervisor's Profile Staff ID
         if (!user) {
-          const profile = await prisma.studentProfile.findUnique({
+          const acadProfile = await prisma.academicSupervisorProfile.findUnique(
+            {
+              where: { staffId: input },
+              include: {
+                user: {
+                  include: { studentProfile: true, academicProfile: true },
+                },
+              },
+            },
+          );
+
+          if (acadProfile) {
+            user = acadProfile.user;
+          }
+        }
+
+        // 3. Third Pass: Check if input matches a Student's Matric ID
+        if (!user) {
+          const studentProfile = await prisma.studentProfile.findUnique({
             where: { matricId: input },
-            include: { user: { include: { studentProfile: true } } },
+            include: {
+              user: {
+                include: { studentProfile: true, academicProfile: true },
+              },
+            },
           });
 
-          if (profile) {
-            user = profile.user;
+          if (studentProfile) {
+            user = studentProfile.user;
           }
         }
 
         // 3. System Validation Gate
         if (user) {
-          // During the pilot phase, we accept their student ID as the password.
-          // We check if the typed password matches their matricId or a default fallback.
-          const expectedPassword =
-            user.studentProfile?.matricId || "password123";
+          let expectedPassword = "password123"; // Admin or universal backup template
+
+          if (user.role === "STUDENT" && user.studentProfile?.matricId) {
+            expectedPassword = user.studentProfile.matricId;
+          } else if (
+            user.role === "ACADEMIC_SUPERVISOR" &&
+            user.academicProfile?.staffId
+          ) {
+            expectedPassword = user.academicProfile.staffId; // Lecturer password = Staff ID
+          }
 
           if (credentials.password === expectedPassword) {
             return {
@@ -79,12 +121,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
+        token.id = user.id;
         token.role = user.role;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user && token.role) {
+        session.user.id = token.id as string;
         session.user.role = token.role;
       }
       return session;
