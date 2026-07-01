@@ -8,6 +8,7 @@ import {
   Users,
   Briefcase,
   FolderUp,
+  ShieldCheck,
 } from "lucide-react";
 
 interface SidebarNavProps {
@@ -60,6 +61,13 @@ export function SidebarNav({ role }: SidebarNavProps) {
       icon: FolderUp,
       isActive: pathname === "/dashboard/documents",
       shouldRender: role === "STUDENT",
+    },
+    {
+      href: "/dashboard/supervisor/documents",
+      label: "Document Clearance",
+      icon: ShieldCheck,
+      isActive: pathname === "/dashboard/supervisor/documents",
+      shouldRender: role === "ACADEMIC_SUPERVISOR" || role === "ADMIN", // 💡 Displays only for Supervisors/Admins
     },
   ];
 

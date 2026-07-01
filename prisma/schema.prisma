@@ -74,13 +74,24 @@ enum PlacementStatus {
 }
 
 model DocumentSubmission {
-  id          String         @id @default(cuid())
+  id          String           @id @default(cuid())
   studentId   String
-  student     StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student     StudentProfile   @relation(fields: [studentId], references: [id], onDelete: Cascade)
   taskName    String
   fileUrl     String
-  isCompleted Boolean        @default(false)
-  updatedAt   DateTime       @updatedAt
+  isCompleted Boolean          @default(false)
+  status      SubmissionStatus @default(PENDING) // Tracks the supervisor evaluation state
+  feedback    String?          @db.Text // Stores rejection/revision notes
+  reviewedAt  DateTime? // Timestamp for supervisor audit tracking
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([studentId, taskName])
+}
+
+enum SubmissionStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 model LogbookEntry {

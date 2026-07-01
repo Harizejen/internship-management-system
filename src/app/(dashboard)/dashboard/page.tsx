@@ -10,8 +10,13 @@ import {
   AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
-// We import a client component chart wrapper that we will build in Step 3
 import { SupervisorCharts } from "@/components/dashboard/supervisor-charts";
+
+// 💡 NEW COMPONENT IMPRINTS FOR THE STUDENT WORKSPACE COCKPIT
+import { PlacementCountdown } from "@/components/dashboard/placement-countdown";
+import { DocumentComplianceWidget } from "@/components/dashboard/document-compliance-widget";
+import { RecentLogbookFeed } from "@/components/dashboard/recent-logbook-feed";
+import { StudentHoursChart } from "@/components/dashboard/student-hours-chart";
 
 export default async function DashboardRootPage() {
   const session = await auth();
@@ -28,6 +33,10 @@ export default async function DashboardRootPage() {
   };
   let chartData: { name: string; verified: number; pending: number }[] = [];
 
+  // New unified type-safe containers for student sub-metrics
+  let studentProfileRaw: any = null;
+  let studentWeeklyChartRaw: { name: string; hours: number }[] = [];
+
   // =========================================================================
   // DATA FETCHING LAYER: SUPERVISOR ANALYTICS
   // =========================================================================
@@ -35,7 +44,6 @@ export default async function DashboardRootPage() {
     (role === "ACADEMIC_SUPERVISOR" || role === "ORGANIZATION_SUPERVISOR") &&
     userId
   ) {
-    // 1. Count total students explicitly assigned to this specific supervisor
     supervisorStats.assignedStudents = await prisma.studentProfile.count({
       where: {
         ...(role === "ACADEMIC_SUPERVISOR"
@@ -47,7 +55,6 @@ export default async function DashboardRootPage() {
       },
     });
 
-    // 2. Fetch logbook entries belonging to their students to extract chart metrics
     const logbookSummary = await prisma.logbookEntry.findMany({
       where: {
         student: {
@@ -66,7 +73,6 @@ export default async function DashboardRootPage() {
       },
     });
 
-    // 3. Process flat array metrics into workflow counters
     logbookSummary.forEach((entry) => {
       const isVerified =
         role === "ACADEMIC_SUPERVISOR" ? entry.acadApproved : entry.orgApproved;
@@ -77,7 +83,6 @@ export default async function DashboardRootPage() {
       }
     });
 
-    // 4. Group data patterns into week-by-week mock groups for the chart
     chartData = [
       {
         name: "Week 1",
@@ -89,13 +94,20 @@ export default async function DashboardRootPage() {
     ];
   }
 
-  // Fallback Student data pipeline lookup
+  // =========================================================================
+  // DATA FETCHING LAYER: SUPERVISED STUDENT EXPANSION MODULE
+  // =========================================================================
   if (role === "STUDENT" && userId) {
     const profile = await prisma.studentProfile.findUnique({
       where: { userId },
-      include: { logbookEntries: true },
+      include: {
+        logbookEntries: { orderBy: { date: "desc" } },
+        submissions: true,
+      },
     });
+
     if (profile) {
+      studentProfileRaw = profile;
       studentStats.entriesCount = profile.logbookEntries.length;
       studentStats.totalHours = profile.logbookEntries.reduce(
         (sum, e) => sum + e.hoursWorked,
@@ -104,6 +116,22 @@ export default async function DashboardRootPage() {
       studentStats.approvedCount = profile.logbookEntries.filter(
         (e) => e.orgApproved && e.acadApproved,
       ).length;
+
+      // Map raw logged entries into a clean weekly chart matrix
+      const weeklyAggregation: Record<number, number> = {};
+      profile.logbookEntries.forEach((entry) => {
+        weeklyAggregation[entry.weekNumber] =
+          (weeklyAggregation[entry.weekNumber] || 0) + entry.hoursWorked;
+      });
+
+      studentWeeklyChartRaw = Object.keys(weeklyAggregation)
+        .map((week) => ({
+          name: `Week ${week}`,
+          hours: weeklyAggregation[Number(week)],
+        }))
+        .sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { numeric: true }),
+        );
     }
   }
 
@@ -132,7 +160,6 @@ export default async function DashboardRootPage() {
       {(role === "ACADEMIC_SUPERVISOR" ||
         role === "ORGANIZATION_SUPERVISOR") && (
         <div className="space-y-8">
-          {/* Top Row Stat Cards Grid */}
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="rounded-2xl border border-[#e2e8f0] bg-white p-6 shadow-xs">
               <div className="flex items-center justify-between">
@@ -192,12 +219,10 @@ export default async function DashboardRootPage() {
             </div>
           </div>
 
-          {/* Interactive Chart Section */}
           <div className="grid gap-6 lg:grid-cols-12">
             <div className="lg:col-span-8 bg-white p-6 rounded-2xl border border-[#e2e8f0] shadow-xs">
               <SupervisorCharts data={chartData} />
             </div>
-
             <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-[#e2e8f0] shadow-xs flex flex-col justify-between">
               <div>
                 <h3 className="text-base font-bold text-slate-800 tracking-tight">
@@ -209,7 +234,7 @@ export default async function DashboardRootPage() {
               </div>
               <div className="space-y-2 mt-4">
                 <Link
-                  href="/dashboard/review"
+                  href="/dashboard/supervisor/documents"
                   className="flex items-center justify-between rounded-xl border border-[#e2e8f0] bg-[#f4f6fa] px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-100 transition-colors"
                 >
                   Open Verification Desk Queue
@@ -224,10 +249,11 @@ export default async function DashboardRootPage() {
       )}
 
       {/* =========================================================================
-          STUDENT VIEWPORT LAYOUT RE-RENDER
+          STUDENT VIEWPORT LAYOUT RE-RENDERED AS AN ASYMMETRIC CONTROL COCKPIT
          ========================================================================= */}
-      {role === "STUDENT" && (
+      {role === "STUDENT" && studentProfileRaw && (
         <div className="space-y-6">
+          {/* Top Quick Stats Row Banner */}
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="rounded-2xl border border-[#e2e8f0] bg-white p-6 shadow-xs">
               <div className="flex items-center justify-between">
@@ -238,7 +264,7 @@ export default async function DashboardRootPage() {
                   <Clock className="h-5 w-5" />
                 </div>
               </div>
-              <p className="text-3xl font-extrabold tracking-tight text-slate-800 mt-4">
+              <p className="text-3xl font-extrabold tracking-tight text-slate-800 mt-4 font-mono">
                 {studentStats.totalHours.toFixed(1)}
               </p>
             </div>
@@ -251,7 +277,7 @@ export default async function DashboardRootPage() {
                   <BookOpen className="h-5 w-5" />
                 </div>
               </div>
-              <p className="text-3xl font-extrabold tracking-tight text-slate-800 mt-4">
+              <p className="text-3xl font-extrabold tracking-tight text-slate-800 mt-4 font-mono">
                 {studentStats.entriesCount}
               </p>
             </div>
@@ -264,9 +290,32 @@ export default async function DashboardRootPage() {
                   <CheckCircle2 className="h-5 w-5" />
                 </div>
               </div>
-              <p className="text-3xl font-extrabold tracking-tight text-slate-800 mt-4">
+              <p className="text-3xl font-extrabold tracking-tight text-slate-800 mt-4 font-mono">
                 {studentStats.approvedCount}
               </p>
+            </div>
+          </div>
+
+          {/* 📐 THE ASYMMETRIC GRID WORKSPACE (70% Left Main / 30% Right Sidebar) */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+            {/* Left Main Workspace Column (70% Width) */}
+            <div className="lg:col-span-2 space-y-6">
+              <div className="bg-white p-5 rounded-2xl border border-[#e2e8f0] shadow-xs">
+                <StudentHoursChart data={studentWeeklyChartRaw} />
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-[#e2e8f0] shadow-xs">
+                <RecentLogbookFeed
+                  entries={studentProfileRaw.logbookEntries.slice(0, 4)}
+                />
+              </div>
+            </div>
+
+            {/* Right Information Sidebar Column (30% Width) */}
+            <div className="space-y-6">
+              <PlacementCountdown profile={studentProfileRaw} />
+              <DocumentComplianceWidget
+                submissions={studentProfileRaw.submissions}
+              />
             </div>
           </div>
         </div>

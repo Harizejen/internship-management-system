@@ -29,31 +29,29 @@ export async function submitDocumentAction(formData: FormData) {
       };
     }
 
-    // 💡 THE CURE FOR DUPLICATE ROWS: Check if this file asset row already exists
-    const existingSubmission = await prisma.documentSubmission.findFirst({
+    // 💡 Clean, native Upsert using our new unique constraints
+    await prisma.documentSubmission.upsert({
       where: {
+        studentId_taskName: {
+          studentId: studentProfile.id,
+          taskName: taskName,
+        },
+      },
+      update: {
+        fileUrl,
+        isCompleted: true,
+        status: "PENDING", // Reset back to pending loop upon re-upload
+        feedback: null, // Wipe previous rejection notes
+        reviewedAt: null, // Reset audit timestamp
+      },
+      create: {
         studentId: studentProfile.id,
-        taskName: taskName,
+        taskName,
+        fileUrl,
+        isCompleted: true,
+        status: "PENDING",
       },
     });
-
-    if (existingSubmission) {
-      // If it exists, overwrite the old URL reference string with the new one
-      await prisma.documentSubmission.update({
-        where: { id: existingSubmission.id },
-        data: { fileUrl },
-      });
-    } else {
-      // If it's a completely fresh upload, create the record row normally
-      await prisma.documentSubmission.create({
-        data: {
-          studentId: studentProfile.id,
-          taskName,
-          fileUrl,
-          isCompleted: true,
-        },
-      });
-    }
 
     revalidatePath("/dashboard/documents");
     return { success: true };
@@ -69,17 +67,10 @@ export async function deleteDocumentAction(formData: FormData) {
   const session = await auth();
 
   if (!session?.user || session.user.role !== "STUDENT") {
-    return {
-      error:
-        "Security Exception: Unauthorized document modification parameters.",
-    };
+    return { error: "Security Exception: Unauthorized document modification." };
   }
 
   const taskName = formData.get("taskName") as string;
-
-  if (!taskName) {
-    return { error: "Target task identification token is missing." };
-  }
 
   try {
     const studentProfile = await prisma.studentProfile.findUnique({
@@ -92,19 +83,14 @@ export async function deleteDocumentAction(formData: FormData) {
       };
     }
 
-    // Locate the matching row vector and wipe it from the schema collection
-    const targetRow = await prisma.documentSubmission.findFirst({
+    await prisma.documentSubmission.delete({
       where: {
-        studentId: studentProfile.id,
-        taskName: taskName,
+        studentId_taskName: {
+          studentId: studentProfile.id,
+          taskName: taskName,
+        },
       },
     });
-
-    if (targetRow) {
-      await prisma.documentSubmission.delete({
-        where: { id: targetRow.id },
-      });
-    }
 
     revalidatePath("/dashboard/documents");
     return { success: true };
