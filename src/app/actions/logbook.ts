@@ -4,6 +4,9 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 
+// =========================================================================
+// PIPELINE A: CREATE NEW DAILY ENTRY
+// =========================================================================
 export async function createLogbookEntryAction(formData: FormData) {
   const session = await auth();
 
@@ -29,7 +32,6 @@ export async function createLogbookEntryAction(formData: FormData) {
       return { error: "Student profile records missing configuration." };
     }
 
-    // Write structural entry matching the exact Prisma schema columns
     await prisma.logbookEntry.create({
       data: {
         studentId: studentProfile.id,
@@ -37,7 +39,6 @@ export async function createLogbookEntryAction(formData: FormData) {
         weekNumber,
         activityDetails,
         hoursWorked,
-        // orgApproved and acadApproved automatically default to false via database layer
       },
     });
 
@@ -45,12 +46,56 @@ export async function createLogbookEntryAction(formData: FormData) {
     return { success: true };
   } catch (error: any) {
     console.error("Logbook entry creation failure:", error);
-    // Handle the unique constraint catch if a student tries logging the same date twice
     if (error?.code === "P2002") {
       return {
         error: "You have already committed a log entry for this specific date.",
       };
     }
     return { error: "Failed to synchronize entry to cloud cluster database." };
+  }
+}
+
+// =========================================================================
+// PIPELINE B: CORRECT FLAGGED ENTRY (Matches Schema Exactly)
+// =========================================================================
+export async function correctLogbookEntryAction(formData: FormData) {
+  const session = await auth();
+
+  if (!session?.user || session.user.role !== "STUDENT") {
+    return {
+      error:
+        "Security Exception: Unauthorized logbook modification parameters.",
+    };
+  }
+
+  const entryId = formData.get("entryId") as string;
+  const activityDetails = formData.get("activityDetails") as string;
+  const hoursWorked = parseFloat(formData.get("hoursWorked") as string);
+
+  if (!entryId || !activityDetails || isNaN(hoursWorked)) {
+    return { error: "Missing required update fields." };
+  }
+
+  try {
+    // Sync updates with exact schema field alignments
+    await prisma.logbookEntry.update({
+      where: { id: entryId },
+      data: {
+        activityDetails: activityDetails.trim(),
+        hoursWorked: hoursWorked,
+        orgApproved: false, // Reset validation gate flag
+        acadApproved: false, // Reset validation gate flag
+        orgFeedback: null, // Flush supervisor string data
+        acadFeedback: null, // Flush supervisor string data
+        orgApprovedAt: null, // Wipe past signature timestamp
+        acadApprovedAt: null, // Wipe past signature timestamp
+      },
+    });
+
+    revalidatePath("/dashboard/logbook");
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to commit logbook revision:", error);
+    return { error: "Failed to sync changes to database." };
   }
 }
