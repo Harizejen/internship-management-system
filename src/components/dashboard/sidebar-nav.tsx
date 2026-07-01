@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, BookOpen, Users, Briefcase } from "lucide-react";
+import {
+  LayoutDashboard,
+  BookOpen,
+  Users,
+  Briefcase,
+  FolderUp,
+} from "lucide-react";
 
 interface SidebarNavProps {
   role?: string;
@@ -46,6 +52,13 @@ export function SidebarNav({ role }: SidebarNavProps) {
       label: "Internship Placement",
       icon: Briefcase,
       isActive: pathname === "/dashboard/placement",
+      shouldRender: role === "STUDENT",
+    },
+    {
+      href: "/dashboard/documents",
+      label: "Document Submissions",
+      icon: FolderUp,
+      isActive: pathname === "/dashboard/documents",
       shouldRender: role === "STUDENT",
     },
   ];

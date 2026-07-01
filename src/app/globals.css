@@ -117,6 +117,17 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+.uc-light.ims-uploader {
+  --uc-primary: #4f46e5;               /* Injects your system's brand Indigo */
+  --uc-primary-hover-light: #4338ca;   /* Deep indigo accent for hover states */
+  --uc-radius: 16px;                   /* Matches your dashboard's rounded-2xl arcs */
+  --uc-font-family: inherit;           /* Inherits your system typography layout */
+}
+
+.ims-uploader::part(subtitles) {
+  display: none !important;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
