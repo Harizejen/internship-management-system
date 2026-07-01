@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, BookOpen, Users } from "lucide-react";
+import { LayoutDashboard, BookOpen, Users, Briefcase } from "lucide-react";
 
 interface SidebarNavProps {
   role?: string;
@@ -40,6 +40,13 @@ export function SidebarNav({ role }: SidebarNavProps) {
       icon: Users, // You can swap this to ShieldAlert or ClipboardList if preferred
       isActive: pathname === "/dashboard/admin",
       shouldRender: role === "ADMIN",
+    },
+    {
+      href: "/dashboard/placement",
+      label: "Internship Placement",
+      icon: Briefcase,
+      isActive: pathname === "/dashboard/placement",
+      shouldRender: role === "STUDENT",
     },
   ];
 
