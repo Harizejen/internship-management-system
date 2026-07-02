@@ -28,8 +28,9 @@ export default async function DashboardRootPage() {
   let studentStats = { totalHours: 0, entriesCount: 0, approvedCount: 0 };
   let supervisorStats = {
     assignedStudents: 0,
-    totalPending: 0,
-    totalVerified: 0,
+    totalPendingLogs: 0, // 💡 Clarified data scope naming
+    totalPendingDocs: 0, // 💡 NEW: Aggregates pending Uploadcare files
+    totalVerifiedLogs: 0,
   };
   let chartData: { name: string; verified: number; pending: number }[] = [];
 
@@ -44,6 +45,7 @@ export default async function DashboardRootPage() {
     (role === "ACADEMIC_SUPERVISOR" || role === "ORGANIZATION_SUPERVISOR") &&
     userId
   ) {
+    // 1. Count total students explicitly assigned to this specific supervisor
     supervisorStats.assignedStudents = await prisma.studentProfile.count({
       where: {
         ...(role === "ACADEMIC_SUPERVISOR"
@@ -55,6 +57,22 @@ export default async function DashboardRootPage() {
       },
     });
 
+    // 2. Count pending multi-cloud document submissions waiting for clearance natively
+    supervisorStats.totalPendingDocs = await prisma.documentSubmission.count({
+      where: {
+        status: "PENDING",
+        student: {
+          ...(role === "ACADEMIC_SUPERVISOR"
+            ? { academicSupervisorId: userId }
+            : {}),
+          ...(role === "ORGANIZATION_SUPERVISOR"
+            ? { orgSupervisorId: userId }
+            : {}),
+        },
+      },
+    });
+
+    // 3. Fetch logbook entries belonging to their students to extract chart metrics
     const logbookSummary = await prisma.logbookEntry.findMany({
       where: {
         student: {
@@ -69,29 +87,48 @@ export default async function DashboardRootPage() {
       select: {
         acadApproved: true,
         orgApproved: true,
+        weekNumber: true, // 💡 Selected for custom chart grouping
         date: true,
       },
     });
 
+    // 4. 📊 THE CHART FIX: Group flat dataset into true week-by-week metrics
+    const weeklyDataMap: Record<string, { verified: number; pending: number }> =
+      {};
+
     logbookSummary.forEach((entry) => {
       const isVerified =
         role === "ACADEMIC_SUPERVISOR" ? entry.acadApproved : entry.orgApproved;
+      const weekKey = `Week ${entry.weekNumber || 1}`;
+
+      if (!weeklyDataMap[weekKey]) {
+        weeklyDataMap[weekKey] = { verified: 0, pending: 0 };
+      }
+
       if (isVerified) {
-        supervisorStats.totalVerified++;
+        supervisorStats.totalVerifiedLogs++;
+        weeklyDataMap[weekKey].verified++;
       } else {
-        supervisorStats.totalPending++;
+        supervisorStats.totalPendingLogs++;
+        weeklyDataMap[weekKey].pending++;
       }
     });
 
-    chartData = [
-      {
-        name: "Week 1",
-        verified: supervisorStats.totalVerified,
-        pending: supervisorStats.totalPending,
-      },
-      { name: "Week 2", verified: 0, pending: 0 },
-      { name: "Week 3", verified: 0, pending: 0 },
-    ];
+    // Transform map object neatly into numeric ordered array strings for Recharts
+    chartData = Object.entries(weeklyDataMap)
+      .map(([name, stats]) => ({
+        name,
+        verified: stats.verified,
+        pending: stats.pending,
+      }))
+      .sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { numeric: true }),
+      );
+
+    // Fallback if no log entries have been posted yet
+    if (chartData.length === 0) {
+      chartData = [{ name: "Week 1", verified: 0, pending: 0 }];
+    }
   }
 
   // =========================================================================
@@ -191,10 +228,7 @@ export default async function DashboardRootPage() {
               </div>
               <div className="mt-4 flex items-baseline gap-2">
                 <span className="text-3xl font-extrabold tracking-tight text-slate-800">
-                  {supervisorStats.totalPending}
-                </span>
-                <span className="text-xs font-semibold text-slate-400 font-mono">
-                  Pending Logs
+                  {supervisorStats.totalPendingLogs}
                 </span>
               </div>
             </div>
@@ -210,7 +244,7 @@ export default async function DashboardRootPage() {
               </div>
               <div className="mt-4 flex items-baseline gap-2">
                 <span className="text-3xl font-extrabold tracking-tight text-slate-800">
-                  {supervisorStats.totalVerified}
+                  {supervisorStats.totalVerifiedLogs}
                 </span>
                 <span className="text-xs font-semibold text-slate-400 font-mono">
                   Completed Sign-offs
@@ -229,17 +263,35 @@ export default async function DashboardRootPage() {
                   Supervisor Tasks
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Quick navigation system shortcuts.
+                  Quick navigation operational desk shortcuts.
                 </p>
               </div>
-              <div className="space-y-2 mt-4">
+
+              {/* 💡 THE FIX: Two distinct, dedicated action rows for Logbooks vs Documents */}
+              <div className="space-y-2.5 mt-5">
+                {/* Action 1: Daily Logbook Verification Desk */}
+                <Link
+                  href="/dashboard/review"
+                  className="flex items-center justify-between rounded-xl border border-[#e2e8f0] hover:border-indigo-200 bg-[#f4f6fa]/70 hover:bg-indigo-50/20 px-4 py-3 text-xs font-bold text-slate-700 transition-all group"
+                >
+                  <span className="text-slate-600 group-hover:text-indigo-600 transition-colors">
+                    Verify Student Logbooks
+                  </span>
+                  <span className="bg-slate-200 text-slate-600 font-mono px-2 py-0.5 rounded text-[10px] group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                    {supervisorStats.totalPendingLogs}
+                  </span>
+                </Link>
+
+                {/* Action 2: Institutional Document Clearance Desk */}
                 <Link
                   href="/dashboard/supervisor/documents"
-                  className="flex items-center justify-between rounded-xl border border-[#e2e8f0] bg-[#f4f6fa] px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-100 transition-colors"
+                  className="flex items-center justify-between rounded-xl border border-[#e2e8f0] hover:border-indigo-200 bg-[#f4f6fa]/70 hover:bg-indigo-50/20 px-4 py-3 text-xs font-bold text-slate-700 transition-all group"
                 >
-                  Open Verification Desk Queue
-                  <span className="bg-amber-500 text-white font-mono px-2 py-0.5 rounded text-[10px]">
-                    {supervisorStats.totalPending}
+                  <span className="text-slate-600 group-hover:text-indigo-600 transition-colors">
+                    Clear Milestone Documents
+                  </span>
+                  <span className="bg-slate-200 text-slate-600 font-mono px-2 py-0.5 rounded text-[10px] group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                    {supervisorStats.totalPendingDocs}
                   </span>
                 </Link>
               </div>
